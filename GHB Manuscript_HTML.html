@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GHB in PM Blood and Urine (JAT)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 880px; }
+    label { display: block; margin: 10px 0 6px; font-weight: 600; }
+    input { width: 240px; padding: 8px; font-size: 16px; }
+    button { margin-top: 14px; padding: 10px 14px; font-size: 16px; cursor: pointer; }
+    .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+    .card { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 10px; }
+    .big { font-size: 20px; font-weight: 700; margin: 0 0 6px; }
+    .muted { color: #555; margin: 4px 0; }
+    .err { color: #b00020; font-weight: 700; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+
+    .plotWrap { margin-top: 16px; }
+    .plotTitle { font-weight: 700; margin: 0 0 6px; }
+    svg { border: 1px solid #ddd; border-radius: 10px; background: #fff; }
+    .axis { stroke: #111; stroke-width: 1; }
+    .grid { stroke: #eee; stroke-width: 1; }
+    .tick { stroke: #111; stroke-width: 1; }
+    .label { font-size: 12px; fill: #111; }
+
+    /* Your requested colors */
+    .activeGrey { stroke: #ff00e6; stroke-width: 2.5; fill: none; }
+    .activeGreen { stroke: #000000; stroke-width: 2.5; fill: none; }
+
+    .pt { fill: #111; }
+    .offscale { color: #b00020; font-weight: 700; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h2>GHB in Postmortem Peripheral Blood and Urine</h2>
+
+  <div class="row">
+    <div>
+      <label for="B">Peripheral blood concentration, mg/L (B)</label>
+      <input id="B" type="number" step="any" inputmode="decimal" placeholder="e.g., 12.5" />
+
+      <label for="U">Urine concentration, mg/L (U)</label>
+      <input id="U" type="number" step="any" inputmode="decimal" placeholder="e.g., 80" />
+
+      <div>
+        <button id="checkBtn">Submit</button>
+        <button id="clearBtn" type="button">Clear</button>
+      </div>
+
+      <div class="card" id="out" aria-live="polite"></div>
+      <div id="offscaleMsg" class="offscale" style="display:none;"></div>
+    </div>
+
+    <div class="plotWrap">
+      <div class="plotTitle"></div>
+      <svg id="plot" width="460" height="320" viewBox="0 0 460 320" role="img"
+           aria-label="Plot of active rule boundaries and your point"></svg>
+      <div class="muted" style="max-width:460px">
+        Reference: JAT doi placeholder.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const out = document.getElementById("out");
+    const offscaleMsg = document.getElementById("offscaleMsg");
+    const bEl = document.getElementById("B");
+    const uEl = document.getElementById("U");
+    const svg = document.getElementById("plot");
+
+    const A_label = "No indication of exogenous use"
+    const B_label = "Possible exogenous use (PEU)"
+    const C_label = "Acute exogenous use (AEU)"
+
+    // Base plot ranges (reference figure)
+    const BASE_XR = { min: 0, max: 200 };   // B
+    const BASE_YR = { min: 0, max: 20 };   // U/B
+
+    // Current plot ranges (auto-scaled per point)
+    let XR = { ...BASE_XR };
+    let YR = { ...BASE_YR };
+
+    const PAD = { l: 44, r: 10, t: 12, b: 34 };
+
+    function fmt(x, d = 4) {
+      if (!Number.isFinite(x)) return "—";
+      return x.toFixed(d).replace(/\.?0+$/, "");
+    }
+
+    function classify(U, B) {
+      if (!Number.isFinite(B) || !Number.isFinite(U)) {
+        return { error: "Enter quantitative values for both U and B." };
+      }
+      if (B <= 0) {
+        return { error: "B must be > 0 (cannot divide by zero or negative B)." };
+      }
+
+      const ratio = U / B;             // U/B
+      const R = ratio + 0.05 * B;      // adjusted
+
+      // Locked rules
+      const isA = (B <= 5) || (R <= 4);
+      const isC = (B > 50) && (R > 10);
+      const label = isA ? A_label : (isC ? C_label : B_label);
+
+      return { label, ratio, R };
+    }
+
+    // --- SVG helpers ---
+    function clearSVG() { while (svg.firstChild) svg.removeChild(svg.firstChild); }
+
+    function svgW() { return svg.viewBox.baseVal.width; }
+    function svgH() { return svg.viewBox.baseVal.height; }
+
+    function xToPx(x) {
+      const w = svgW();
+      const innerW = w - PAD.l - PAD.r;
+      return PAD.l + (x - XR.min) * innerW / (XR.max - XR.min);
+    }
+    function yToPx(y) {
+      const h = svgH();
+      const innerH = h - PAD.t - PAD.b;
+      return PAD.t + (YR.max - y) * innerH / (YR.max - YR.min);
+    }
+
+    function line(x1, y1, x2, y2, cls) {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      el.setAttribute("x1", x1); el.setAttribute("y1", y1);
+      el.setAttribute("x2", x2); el.setAttribute("y2", y2);
+      el.setAttribute("class", cls);
+      svg.appendChild(el);
+      return el;
+    }
+
+    function path(d, cls) {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      el.setAttribute("d", d);
+      el.setAttribute("class", cls);
+      svg.appendChild(el);
+      return el;
+    }
+
+    function text(x, y, str, anchor="start") {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      el.setAttribute("x", x); el.setAttribute("y", y);
+      el.setAttribute("class", "label");
+      el.setAttribute("text-anchor", anchor);
+      el.textContent = str;
+      svg.appendChild(el);
+      return el;
+    }
+
+    function circle(cx, cy, r=4) {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      el.setAttribute("cx", cx); el.setAttribute("cy", cy);
+      el.setAttribute("r", r);
+      el.setAttribute("class", "pt");
+      svg.appendChild(el);
+      return el;
+    }
+
+    // --- autoscale helpers ---
+    function expandRange(baseMin, baseMax, value, padFrac=0.10) {
+      let mn = baseMin, mx = baseMax;
+      if (value < mn) mn = value;
+      if (value > mx) mx = value;
+      const span = mx - mn || 1;
+      const pad = span * padFrac;
+      return { min: mn - pad, max: mx + pad };
+    }
+
+    function niceStep(rawStep) {
+      // Choose a "nice" step: 1, 2, 5 * 10^k
+      const pow = Math.pow(10, Math.floor(Math.log10(rawStep)));
+      const frac = rawStep / pow;
+      let niceFrac = 1;
+      if (frac <= 1) niceFrac = 1;
+      else if (frac <= 2) niceFrac = 2;
+      else if (frac <= 5) niceFrac = 5;
+      else niceFrac = 10;
+      return niceFrac * pow;
+    }
+
+    function tickValues(min, max, targetTicks=7) {
+      const span = max - min || 1;
+      const step = niceStep(span / targetTicks);
+
+      // Expand to "nice" endpoints so axes look clean
+      const niceMin = Math.floor(min / step) * step;
+      const niceMax = Math.ceil(max / step) * step;
+
+      const vals = [];
+      // Include endpoints
+      for (let v = niceMin; v <= niceMax + 1e-9; v += step) vals.push(v);
+
+      return { step, vals, niceMin, niceMax };
+    }
+
+    function drawAxesAndGrid() {
+      const w = svgW();
+      const h = svgH();
+
+      // Determine ticks based on current ranges
+      const xt = tickValues(XR.min, XR.max, 6);
+      const yt = tickValues(YR.min, YR.max, 6);
+
+      // Choose decimals based on tick step, so labels stay sane after autoscale
+      const xDec = (xt.step >= 1) ? 0 : Math.min(6, Math.max(0, Math.ceil(-Math.log10(xt.step))));
+      const yDec = (yt.step >= 1) ? 0 : Math.min(6, Math.max(0, Math.ceil(-Math.log10(yt.step))));
+
+      const fmtTick = (v, dec) => {
+        if (dec === 0) return String(Math.round(v));
+        const s = v.toFixed(dec);
+        // trim trailing zeros ONLY after decimal point
+        const t = s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+        return t;
+      };
+
+      // grid (light)
+      for (const gx of xt.vals) {
+        const x = xToPx(gx);
+        line(x, PAD.t, x, h - PAD.b, "grid");
+      }
+      for (const gy of yt.vals) {
+        const y = yToPx(gy);
+        line(PAD.l, y, w - PAD.r, y, "grid");
+      }
+
+      // axes
+      line(PAD.l, PAD.t, PAD.l, h - PAD.b, "axis");
+      line(PAD.l, h - PAD.b, w - PAD.r, h - PAD.b, "axis");
+
+      // x ticks/labels
+      for (const gx of xt.vals) {
+        const x = xToPx(gx);
+        line(x, h - PAD.b, x, h - PAD.b + 5, "tick");
+        text(x, h - 14, fmtTick(gx, xDec), "middle");
+      }
+      text((PAD.l + (w - PAD.r)) / 2, h - 4, "Blood (B), mg/L", "middle");
+
+      // y ticks/labels
+      for (const gy of yt.vals) {
+        const y = yToPx(gy);
+        line(PAD.l - 5, y, PAD.l, y, "tick");
+        text(PAD.l - 8, y + 4, fmtTick(gy, yDec), "end");
+      }
+      const midY = (PAD.t + (h - PAD.b)) / 2;
+      const ylbl = text(14, midY, "Urine/Blood (U/B) Ratio", "middle");
+      ylbl.setAttribute("transform", `rotate(-90 14 ${midY})`);
+    }
+
+    function buildLinePath(fnY, x0, x1) {
+      const n = 140;
+      let d = "";
+      for (let i = 0; i <= n; i++) {
+        const x = x0 + (x1 - x0) * (i / n);
+        const y = fnY(x);
+        const px = xToPx(x);
+        const py = yToPx(y);
+        d += (i === 0 ? `M ${px} ${py}` : ` L ${px} ${py}`);
+      }
+      return d;
+    }
+
+    function drawActiveBoundariesOnly() {
+      const lower = (b) => 4 - 0.05 * b;
+      const upper = (b) => 10 - 0.05 * b;
+
+      const xMax = XR.max;
+
+      // Lower boundary active for B >= 5 (grey), clipped at y = 0
+      if (xMax > 5) {
+        path(buildLinePath((b) => Math.max(0, lower(b)), 5, xMax), "activeGrey");
+      }
+
+      // Upper boundary active for B >= 50 (green), clipped at y = 0
+      if (xMax > 50) {
+        path(buildLinePath((b) => Math.max(0, upper(b)), 50, xMax), "activeGreen");
+      }
+
+      // Vertical B=5 active segment from max(lower(5), 0) upward (grey)
+      if (5 >= XR.min && 5 <= XR.max) {
+        const yStart = Math.max(lower(5), 0, YR.min);
+        line(xToPx(5), yToPx(yStart), xToPx(5), yToPx(YR.max), "activeGrey");
+      }
+
+      // Vertical B=50 active segment from max(upper(50), 0) upward (green)
+      if (50 >= XR.min && 50 <= XR.max) {
+        const yStart = Math.max(upper(50), 0, YR.min);
+        line(xToPx(50), yToPx(yStart), xToPx(50), yToPx(YR.max), "activeGreen");
+      }
+    }
+
+    function drawPoint(B, ratio) {
+      const px = xToPx(B);
+      const py = yToPx(ratio);
+
+      circle(px, py, 4);
+
+      // Keep label inside plot area
+      const w = svgW(), h = svgH();
+      let lx = px + 8, ly = py - 8, anchor = "start";
+
+      if (px > w - PAD.r - 140) { lx = px - 8; anchor = "end"; }
+      if (py < PAD.t + 14) { ly = py + 16; }
+      if (py > h - PAD.b - 6) { ly = py - 10; }
+
+      text(lx, ly, `(${fmt(B,2)}, ${fmt(ratio,2)})`, anchor);
+    }
+
+    function renderPlot(res) {
+      // base draw
+      XR = { ...BASE_XR };
+      YR = { ...BASE_YR };
+      XR.min = Math.max(0, XR.min);
+      YR.min = Math.max(0, YR.min);
+
+      clearSVG();
+      drawAxesAndGrid();
+      drawActiveBoundariesOnly();
+
+      if (!res || res.error) {
+        offscaleMsg.style.display = "none";
+        return;
+      }
+
+      // Auto-scale only if point is beyond the starting scale
+      const beyondBase = (res.B < BASE_XR.min) || (res.B > BASE_XR.max) ||
+                         (res.ratio < BASE_YR.min) || (res.ratio > BASE_YR.max);
+
+      if (beyondBase) {
+        XR = expandRange(BASE_XR.min, BASE_XR.max, res.B, 0.10);
+        YR = expandRange(BASE_YR.min, BASE_YR.max, res.ratio, 0.10);
+
+        // hard-clip axes at 0
+        XR.min = Math.max(0, XR.min);
+        YR.min = Math.max(0, YR.min);
+
+        // Snap ranges to nice tick endpoints so the axes don't look weird
+        const xtSnap = tickValues(XR.min, XR.max, 6);
+        const ytSnap = tickValues(YR.min, YR.max, 6);
+        XR = { min: Math.max(0, xtSnap.niceMin), max: xtSnap.niceMax };
+        YR = { min: Math.max(0, ytSnap.niceMin), max: ytSnap.niceMax };
+      } else {
+        XR = { ...BASE_XR };
+        YR = { ...BASE_YR };
+      }
+
+      // Re-render after updating ranges
+      clearSVG();
+      drawAxesAndGrid();
+      drawActiveBoundariesOnly();
+      drawPoint(res.B, res.ratio);
+
+      // Note only when scaling changed
+      offscaleMsg.style.display = beyondBase ? "block" : "none";
+      if (beyondBase) {
+        offscaleMsg.textContent = "Plot auto-scaled to include your point.";
+      }
+    }
+
+    function render() {
+      const B = parseFloat(bEl.value);
+      const U = parseFloat(uEl.value);
+
+      const res = classify(U, B);
+      if (res.error) {
+        out.innerHTML = `<div class="err">${res.error}</div>`;
+        renderPlot(res);
+        return;
+      }
+
+      // attach B for plotting
+      res.B = B;
+
+      out.innerHTML = `
+        <div class="medium">(${res.ratio},${B}) → <strong>${res.label}</strong></div>
+        <div class="muted">
+          Calculated Ratio: <code>U/B = ${fmt(res.ratio, 4)}</code><br>
+        </div>
+        <hr />
+        <div class="muted"><strong>Boundaries:</strong></div>
+        <span style="color: #ff00e6;font-weight: bold;">Purple</span> <code>(B = 5) AND (U/B = -0.05·B + 10)</code><br>
+        <span style="color: #000000;font-weight: bold;">Black</span> <code>(B = 50) AND (U/B = -0.05·B + 4)</code>
+        <hr />
+        <div class="muted"><strong>Logic:</strong></div>
+        <div class="muted">'${A_label}' where ON or BELOW <span style="color: #ff00e6;font-weight: bold;">Purple</span> line</div>
+        <div class="muted">'${B_label}' where ABOVE <span style="color: #ff00e6;font-weight: bold;">Purple</span> line and ON or BELOW <span style="color: #000000;font-weight: bold;">Black</span> line</div>
+        <div class="muted">'${C_label}' where ABOVE <span style="color: #000000;font-weight: bold;">Black</span> line</div>
+      `;
+
+      renderPlot(res);
+    }
+
+    // Ensure clicking doesn't try to submit anything
+    document.getElementById("checkBtn").addEventListener("click", (e) => {
+      e.preventDefault?.();
+      render();
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      bEl.value = "";
+      uEl.value = "";
+      out.innerHTML = "";
+      offscaleMsg.style.display = "none";
+      XR = { ...BASE_XR };
+      YR = { ...BASE_YR };
+      XR.min = Math.max(0, XR.min);
+      YR.min = Math.max(0, YR.min);
+      clearSVG();
+      drawAxesAndGrid();
+      drawActiveBoundariesOnly();
+      bEl.focus();
+    });
+
+    [bEl, uEl].forEach(el => el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault?.();
+        render();
+      }
+    }));
+
+    // initial
+    out.innerHTML = `<div class="muted">Enter both concentrations, then click <strong>Submit</strong>.</div>`;
+    clearSVG();
+    drawAxesAndGrid();
+    drawActiveBoundariesOnly();
+</script>
+
+</body>
+</html>
