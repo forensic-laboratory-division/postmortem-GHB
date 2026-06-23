@@ -11,7 +11,7 @@
     button { margin-top: 14px; padding: 10px 14px; font-size: 16px; cursor: pointer; }
     .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
     .card { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 10px; }
-    .big { font-size: 20px; font-weight: 700; margin: 0 0 6px; }
+    .medium { font-size: 20px; font-weight: 700; margin: 0 0 6px; color: blue; }
     .muted { color: #555; margin: 4px 0; }
     .err { color: #b00020; font-weight: 700; }
     code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
@@ -25,8 +25,8 @@
     .label { font-size: 12px; fill: #111; }
 
     /* Your requested colors */
-    .activeGrey { stroke: #ff00e6; stroke-width: 2.5; fill: none; }
-    .activeGreen { stroke: #000000; stroke-width: 2.5; fill: none; }
+    .activePurple { stroke: #ff00e6; stroke-width: 2.5; fill: none; }
+    .activeBlack { stroke: #000000; stroke-width: 2.5; fill: none; }
 
     .pt { fill: blue; }
     .offscale { color: #b00020; font-weight: 700; margin-top: 6px; }
@@ -275,26 +275,26 @@
 
       const xMax = XR.max;
 
-      // Lower boundary active for B >= 5 (grey), clipped at y = 0
+      // Lower boundary active for B >= 5 (purple), clipped at y = 0
       if (xMax > 5) {
-        path(buildLinePath((b) => Math.max(0, lower(b)), 5, xMax), "activeGrey");
+        path(buildLinePath((b) => Math.max(0, lower(b)), 5, xMax), "activePurple");
       }
 
-      // Upper boundary active for B >= 50 (green), clipped at y = 0
+      // Upper boundary active for B >= 50 (black), clipped at y = 0
       if (xMax > 50) {
-        path(buildLinePath((b) => Math.max(0, upper(b)), 50, xMax), "activeGreen");
+        path(buildLinePath((b) => Math.max(0, upper(b)), 50, xMax), "activeBlack");
       }
 
-      // Vertical B=5 active segment from max(lower(5), 0) upward (grey)
+      // Vertical B=5 active segment from max(lower(5), 0) upward (purple)
       if (5 >= XR.min && 5 <= XR.max) {
         const yStart = Math.max(lower(5), 0, YR.min);
-        line(xToPx(5), yToPx(yStart), xToPx(5), yToPx(YR.max), "activeGrey");
+        line(xToPx(5), yToPx(yStart), xToPx(5), yToPx(YR.max), "activePurple");
       }
 
-      // Vertical B=50 active segment from max(upper(50), 0) upward (green)
+      // Vertical B=50 active segment from max(upper(50), 0) upward (black)
       if (50 >= XR.min && 50 <= XR.max) {
         const yStart = Math.max(upper(50), 0, YR.min);
-        line(xToPx(50), yToPx(yStart), xToPx(50), yToPx(YR.max), "activeGreen");
+        line(xToPx(50), yToPx(yStart), xToPx(50), yToPx(YR.max), "activeBlack");
       }
     }
 
@@ -383,17 +383,15 @@
 
       out.innerHTML = `
           <div class="medium">
-            <span style="color: blue;">(${B},${res.ratio})</span>
-            →
-            <strong style="color: blue;">${res.label}</strong>
+            (${fmt(B,2)}, ${fmt(res.ratio,2)}) → ${res.label}
           </div>
         <div class="muted">
           Calculated Ratio: <code>U/B = ${fmt(res.ratio, 4)}</code><br>
         </div>
         <hr />
         <div class="muted"><strong>Boundaries:</strong></div>
-        <span style="color: #ff00e6;font-weight: bold;">Purple</span> <code>(B = 5) AND (U/B = -0.05·B + 10)</code><br>
-        <span style="color: #000000;font-weight: bold;">Black</span> <code>(B = 50) AND (U/B = -0.05·B + 4)</code>
+        <span style="color: #ff00e6;font-weight: bold;">Purple</span> <code>(B = 5) AND (U/B = -0.05·B + 4)</code><br>
+        <span style="color: #000000;font-weight: bold;">Black</span> <code>(B = 50) AND (U/B = -0.05·B + 10)</code>
         <hr />
         <div class="muted"><strong>Logic:</strong></div>
         <div class="muted">'${A_label}' where ON or BELOW <span style="color: #ff00e6;font-weight: bold;">Purple</span> line</div>
