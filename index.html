@@ -28,8 +28,14 @@
     .activeGrey { stroke: #ff00e6; stroke-width: 2.5; fill: none; }
     .activeGreen { stroke: #000000; stroke-width: 2.5; fill: none; }
 
-    .pt { fill: #111; }
+    .pt { fill: blue; }
     .offscale { color: #b00020; font-weight: 700; margin-top: 6px; }
+
+    .pointLabel {
+        font-size: 12px;
+        fill: blue;
+        font-weight: 700;
+      }
   </style>
 </head>
 <body>
@@ -306,7 +312,8 @@
       if (py < PAD.t + 14) { ly = py + 16; }
       if (py > h - PAD.b - 6) { ly = py - 10; }
 
-      text(lx, ly, `(${fmt(B,2)}, ${fmt(ratio,2)})`, anchor);
+      const pointLabel = text(lx, ly, `(${fmt(B,2)}, ${fmt(ratio,2)})`, anchor);
+      pointLabel.setAttribute("class", "pointLabel");
     }
 
     function renderPlot(res) {
@@ -375,7 +382,11 @@
       res.B = B;
 
       out.innerHTML = `
-        <div class="medium">(${res.ratio},${B}) → <strong>${res.label}</strong></div>
+          <div class="medium">
+            <span style="color: blue;">(${B},${res.ratio})</span>
+            →
+            <strong style="color: blue;">${res.label}</strong>
+          </div>
         <div class="muted">
           Calculated Ratio: <code>U/B = ${fmt(res.ratio, 4)}</code><br>
         </div>
